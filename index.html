@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Noor AL Hussain</title>
+<link rel="shortcut icon" href="img/Str.png">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #071a10; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H, gx, gy, gw, gh;
+
+const spheres = [
+  { rx: 0.31, ry: -0.08, r: 0.155, phase: 0.0 },
+  { rx: 0.88, ry: 0.12,  r: 0.175, phase: 1.2 },
+  { rx:-0.04, ry: 0.38,  r: 0.138, phase: 2.1 },
+  { rx: 0.08, ry: 0.88,  r: 0.188, phase: 0.7 },
+  { rx: 0.46, ry: 0.92,  r: 0.150, phase: 1.8 },
+  { rx: 0.93, ry: 0.72,  r: 0.205, phase: 3.0 },
+];
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  gw = Math.min(W * 0.64, 600);
+  gh = gw * 0.625;
+  gx = (W - gw) / 2;
+  gy = (H - gh) / 2;
+}
+
+function drawBg() {
+  const g = ctx.createRadialGradient(W*0.35, H*0.44, 0, W*0.5, H*0.5, W*0.9);
+  g.addColorStop(0,   '#1e5538');
+  g.addColorStop(0.4, '#0e3022');
+  g.addColorStop(1,   '#061610');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawSphere(cx, cy, r) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur  = r * 0.5;
+  ctx.shadowOffsetY = r * 0.25;
+  const g = ctx.createRadialGradient(cx - r*0.28, cy - r*0.28, r*0.04, cx, cy, r);
+  g.addColorStop(0,    '#62bf84');
+  g.addColorStop(0.22, '#42905e');
+  g.addColorStop(0.58, '#2b6448');
+  g.addColorStop(1,    '#173d28');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.clip();
+  const spec = ctx.createRadialGradient(cx - r*0.28, cy - r*0.28, 0, cx - r*0.28, cy - r*0.28, r*0.46);
+  spec.addColorStop(0, 'rgba(210,255,230,0.26)');
+  spec.addColorStop(1, 'rgba(210,255,230,0)');
+  ctx.fillStyle = spec;
+  ctx.fill();
+  ctx.restore();
+}
+
+function stackBlur(data, w, h, radius) {
+  const div = radius * 2 + 1;
+  const r1  = radius + 1;
+  const mul = Math.round(65536 / (radius * (radius+2) + 1));
+  const shg = 16;
+
+  let x, y, i, p, rsum, gsum, bsum, yp, yi, yw = 0;
+  const stack = [];
+  for (i = 0; i < div; i++) stack[i] = [0,0,0];
+
+  for (y = 0; y < h; y++) {
+    rsum = gsum = bsum = 0;
+    let rinsum=0,ginsum=0,binsum=0,routsum=0,goutsum=0,boutsum=0;
+    for (i = -radius; i <= radius; i++) {
+      p = (yi + Math.min(w-1, Math.max(0, i))) * 4;
+      const s = stack[i+radius];
+      s[0] = data[p]; s[1] = data[p+1]; s[2] = data[p+2];
+      const rbs = r1 - Math.abs(i);
+      rsum += s[0]*rbs; gsum += s[1]*rbs; bsum += s[2]*rbs;
+      if (i > 0) { rinsum+=s[0]; ginsum+=s[1]; binsum+=s[2]; }
+      else        { routsum+=s[0]; goutsum+=s[1]; boutsum+=s[2]; }
+    }
+    let sp = radius;
+    for (x = 0; x < w; x++) {
+      data[yi*4]   = (rsum*mul)>>shg;
+      data[yi*4+1] = (gsum*mul)>>shg;
+      data[yi*4+2] = (bsum*mul)>>shg;
+      rsum -= routsum; gsum -= goutsum; bsum -= boutsum;
+      const ss = (sp - radius + div) % div;
+      const so = stack[ss];
+      routsum -= so[0]; goutsum -= so[1]; boutsum -= so[2];
+      p = (yw + Math.min(w-1, x+r1)) * 4;
+      so[0]=data[p]; so[1]=data[p+1]; so[2]=data[p+2];
+      rinsum+=so[0]; ginsum+=so[1]; binsum+=so[2];
+      rsum += rinsum; gsum += ginsum; bsum += binsum;
+      sp = (sp+1)%div; const si = stack[sp];
+      routsum+=si[0]; goutsum+=si[1]; boutsum+=si[2];
+      rinsum-=si[0]; ginsum-=si[1]; binsum-=si[2];
+      yi++;
+    }
+    yw += w;
+  }
+
+  for (x = 0; x < w; x++) {
+    rsum=gsum=bsum=rinsum=ginsum=binsum=routsum=goutsum=boutsum=0;
+    yp = -radius * w;
+    for (i = -radius; i <= radius; i++) {
+      yi = Math.max(0,yp) + x;
+      const s = stack[i+radius];
+      s[0]=data[yi*4]; s[1]=data[yi*4+1]; s[2]=data[yi*4+2];
+      const rbs = r1 - Math.abs(i);
+      rsum+=s[0]*rbs; gsum+=s[1]*rbs; bsum+=s[2]*rbs;
+      if (i>0){rinsum+=s[0];ginsum+=s[1];binsum+=s[2];}
+      else    {routsum+=s[0];goutsum+=s[1];boutsum+=s[2];}
+      if (i < h-1) yp += w;
+    }
+    yi = x;
+    let sp = radius;
+    for (y = 0; y < h; y++) {
+      data[yi*4]   = (rsum*mul)>>shg;
+      data[yi*4+1] = (gsum*mul)>>shg;
+      data[yi*4+2] = (bsum*mul)>>shg;
+      rsum -= routsum; gsum -= goutsum; bsum -= boutsum;
+      const ss = (sp-radius+div)%div;
+      const so = stack[ss];
+      routsum-=so[0]; goutsum-=so[1]; boutsum-=so[2];
+      const ny = Math.min(y+r1, h-1)*w + x;
+      so[0]=data[ny*4]; so[1]=data[ny*4+1]; so[2]=data[ny*4+2];
+      rinsum+=so[0]; ginsum+=so[1]; binsum+=so[2];
+      rsum+=rinsum; gsum+=ginsum; bsum+=binsum;
+      sp=(sp+1)%div; const si=stack[sp];
+      routsum+=si[0]; goutsum+=si[1]; boutsum+=si[2];
+      rinsum-=si[0]; ginsum-=si[1]; binsum-=si[2];
+      yi += w;
+    }
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+function drawGlass() {
+  const rx = Math.round(gx), ry = Math.round(gy);
+  const rw = Math.round(gw), rh = Math.round(gh);
+
+  const imgData = ctx.getImageData(rx, ry, rw, rh);
+  stackBlur(imgData.data, rw, rh, 20);
+
+  const off = new OffscreenCanvas(rw, rh);
+  const octx = off.getContext('2d');
+  octx.putImageData(imgData, 0, 0);
+
+  ctx.save();
+  roundRect(ctx, gx, gy, gw, gh, 20);
+  ctx.clip();
+
+  ctx.drawImage(off, gx, gy);
+
+  const tint = ctx.createLinearGradient(gx, gy, gx, gy+gh);
+  tint.addColorStop(0,   'rgba(28, 90, 62, 0.30)');
+  tint.addColorStop(0.5, 'rgba(14, 52, 36, 0.20)');
+  tint.addColorStop(1,   'rgba(20, 72, 50, 0.26)');
+  ctx.fillStyle = tint;
+  ctx.fillRect(gx, gy, gw, gh);
+
+  const glow = ctx.createRadialGradient(gx+gw*0.76, gy+gh*0.24, 0, gx+gw*0.76, gy+gh*0.24, gw*0.42);
+  glow.addColorStop(0, 'rgba(110, 230, 165, 0.10)');
+  glow.addColorStop(1, 'rgba(110, 230, 165, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(gx, gy, gw, gh);
+
+  ctx.restore();
+
+  ctx.save();
+  roundRect(ctx, gx, gy, gw, gh, 20);
+  ctx.strokeStyle = 'rgba(140, 230, 170, 0.28)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(gx + 30, gy + 0.8);
+  ctx.lineTo(gx + gw - 30, gy + 0.8);
+  ctx.strokeStyle = 'rgba(195, 255, 215, 0.42)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+
+const strImg = new Image();
+strImg.src = 'str.png';
+
+function drawText() {
+  const pad  = gw * 0.088;
+  const bpad = gh * 0.125;
+  const titleSize = Math.min(gw * 0.098, 58);
+  const bodySize  = Math.min(gw * 0.0225, 13.5);
+
+  ctx.save();
+  ctx.fillStyle = '#93d9b5';
+  ctx.font = `700 ${titleSize}px 'Barlow Condensed', sans-serif`;
+  ctx.shadowColor = 'rgba(80,200,130,0.28)';
+  ctx.shadowBlur  = 30;
+
+  const line1 = 'University of';
+  const line2 = 'Karbala';
+  const lh    = titleSize * 1.02;
+  const bodyLines = [
+    'Computer Science and Information Technology',
+  ];
+
+  const totalBodyH = bodyLines.length * bodySize * 1.68;
+  const totalTextH = lh * 2 + 18 + totalBodyH;
+  const startY = gy + gh - bpad - totalBodyH;
+  const titleY = startY - 18 - lh * 2;
+
+  if (strImg.complete && strImg.naturalWidth > 0) {
+    const imgSize = titleSize * 1.4;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur  = 14;
+    ctx.drawImage(strImg, gx + pad, titleY - imgSize - 6, imgSize, imgSize);
+    ctx.restore();
+  }
+
+  ctx.fillText(line1, gx + pad, titleY + lh);
+  ctx.fillText(line2, gx + pad, titleY + lh * 2);
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle  = '#80c49a';
+  ctx.font       = `400 ${bodySize}px 'Barlow', sans-serif`;
+  ctx.globalAlpha = 0.88;
+
+  for (let i = 0; i < bodyLines.length; i++) {
+    ctx.fillText(bodyLines[i], gx + pad, startY + i * bodySize * 1.68 + bodySize);
+  }
+
+  ctx.restore();
+}
+
+function frame(ts) {
+  const t = ts / 1000;
+  drawBg();
+
+  const baseR = Math.min(W, H) * 0.155;
+  spheres.forEach(s => {
+    const cx = s.rx * W;
+    const cy = s.ry * H + Math.sin(t * 0.85 + s.phase) * 18;
+    drawSphere(cx, cy, s.r * Math.min(W, H));
+  });
+
+  drawGlass();
+  drawText();
+  requestAnimationFrame(frame);
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+document.fonts.ready.then(() => requestAnimationFrame(frame));
+</script>
+</body>
+</html>
